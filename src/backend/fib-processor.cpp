@@ -565,36 +565,27 @@ int16_t FIBProcessor::HandleFIG0Extension13(
         lOffset += (11 + 5 + 8 * length);
 //        std::clog << " ";
         switch (appType) {
-            case 0x000:     // reserved for future use
+            case 0x000:     // reserved
             case 0x001:     // not used
                 break;
 
-            case 0x002:     // MOT slideshow
-//            std::clog << "MOT slideshow"; break;
-            case 0x003:     // MOT Broadcast Web Site
-//            std::clog << "MOT Broadcast Web Site "; break;
             case 0x004:     // TPEG
-//            std::clog << "TPEG length " << length; break;
-            case 0x005:     // DGPS
-//            std::clog << "DGPS"; break;
-            case 0x006:     // TMC
-//            std::clog << "TMC "; break;
             case 0x007:     // EPG
-//            std::clog << "EPG length " << length; break;
-            case 0x008:     // DAB Java
-//            std::clog << "DAB Java"; break;
-            case 0x009:     // DMB
-//            std::clog << "DMB"; break;
-            case 0x00a:     // IPDC services
-//            std::clog << "IPDC services"; break;
-            case 0x00b:     // Voice applications
-//            std::clog << "Voice applications"; break;
-            case 0x00c:     // Middleware
-//            std::clog << "Middleware"; break;
-            case 0x00d:     // Filecasting
-//            std::clog << "Filecasting"; break;
-            case 0x44a:     // Journaline
-//            std::clog << "Journaline"; break;
+            case 0x44a: {   // Journaline (ETSI TS 102 979)
+                ServiceComponent* comp = findPacketComponent(
+                        (SCIds << 4) | (SCIds & 0x0F));
+                journalinePresent  = true;
+                journalineSId      = SId;
+                journalineAppType  = static_cast<uint16_t>(appType);
+                if (comp != nullptr) {
+                    journalineScId = comp->SCId;
+                    std::clog << "fib-processor: PacketService appType=0x"
+                              << std::hex << appType
+                              << " SId=0x" << SId
+                              << " SCId=0x" << comp->SCId << std::dec << "\n";
+                }
+                break;
+            }
 
             default:
                 break;
@@ -1356,4 +1347,15 @@ FIBProcessor::AsaState FIBProcessor::getAsaState() const
     s.has_region  = asaHasRegion;
     s.region_id   = asaRegionId;
     return s;
+}
+
+FIBProcessor::JournalineInfo FIBProcessor::getJournalineInfo() const
+{
+    std::lock_guard<std::mutex> lock(mutex);
+    JournalineInfo info;
+    info.present    = journalinePresent;
+    info.service_id = journalineSId;
+    info.scid       = journalineScId;
+    info.apptype    = journalineAppType;
+    return info;
 }

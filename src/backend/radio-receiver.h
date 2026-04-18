@@ -105,6 +105,10 @@ class RadioReceiver {
         // ASA – Automatic Safety Alert
         FIBProcessor::AsaState getAsaState() const;
 
+        // Journaline – packet-mode text service (ETSI TS 102 979)
+        FIBProcessor::JournalineInfo getJournalineInfo() const;
+        bool addJournalineToDecode(ProgrammeHandlerInterface& handler);
+
     private:
         bool playProgramme(ProgrammeHandlerInterface& handler,
                 const Service& s,

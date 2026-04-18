@@ -482,6 +482,12 @@ bool WebRadioInterface::dispatch_client(Socket&& client)
             else if (req.url == "/mux.json") {
                 success = send_mux_json(s);
             }
+            else if (req.url == "/journaline.json") {
+                success = send_journaline_json(s);
+            }
+            else if (req.url == "/rxlog.json") {
+                success = send_rxlog_json(s);
+            }
             else if (req.url == "/mux.m3u") {
                 success = send_mux_playlist(s);
             }
@@ -811,6 +817,73 @@ bool WebRadioInterface::send_mux_json(Socket& s)
             last_asa.region_id   = asa.region_id;
         }
         mux_json.asa = last_asa;
+
+        // Journaline: starte Dekodierung wenn Dienst erkannt und noch nicht gestartet
+        {
+            lock_guard<mutex> rlock(rx_mut);
+            if (rx and not journaline_decode_started) {
+                const auto jinfo = rx->getJournalineInfo();
+                if (jinfo.present) {
+                    // Eigenen Handler erstellen – Paketdienste sind nicht in phs
+                    if (!journaline_ph) {
+                        journaline_ph = make_unique<WebProgrammeHandler>(
+                                jinfo.service_id, decode_settings.outputCodec);
+                    }
+                    bool ok = rx->addJournalineToDecode(
+                            static_cast<ProgrammeHandlerInterface&>(*journaline_ph));
+                    if (ok) {
+                        journaline_decode_started = true;
+                        clog << "WebRadioInterface: Journaline decoding started\n";
+                    }
+                }
+            }
+        }
+
+        // Journaline-Objekte aus dem dedizierten Handler sammeln
+        {
+            lock_guard<mutex> rlock(rx_mut);
+            if (rx) {
+                const auto jinfo = rx->getJournalineInfo();
+                mux_json.journaline.present  = jinfo.present;
+                mux_json.journaline.apptype  = jinfo.apptype;
+                // service_type bestimmen
+                if (jinfo.apptype == 0x44a)
+                    mux_json.journaline.service_type = "journaline";
+                else if (jinfo.apptype == 0x004)
+                    mux_json.journaline.service_type = "tpeg";
+                else if (jinfo.apptype == 0x007)
+                    mux_json.journaline.service_type = "epg";
+                else if (jinfo.apptype != 0)
+                    mux_json.journaline.service_type = "unknown";
+
+                if (journaline_ph) {
+                    for (const auto& obj : journaline_ph->getJournalineObjects()) {
+                        JournalineObjectJson j;
+                        j.object_id = obj.object_id;
+                        j.type      = obj.type;
+                        j.title     = obj.title;
+                        j.body      = obj.body;
+                        j.received  = chrono::system_clock::to_time_t(obj.time);
+                        mux_json.journaline.objects.push_back(std::move(j));
+
+                        // RxLog befüllen (nur echte Journaline-Objekte)
+                        if (jinfo.apptype == 0x44a) {
+                            lock_guard<mutex> rxlock(rxlog_mutex_);
+                            RxLogEntry e;
+                            e.received     = j.received;
+                            e.service_type = "journaline";
+                            e.apptype      = jinfo.apptype;
+                            e.object_id    = obj.object_id;
+                            e.obj_type     = obj.type;
+                            e.title        = obj.title;
+                            rxlog_.push_back(std::move(e));
+                            if (rxlog_.size() > RXLOG_MAX)
+                                rxlog_.pop_front();
+                        }
+                    }
+                }
+            }
+        }
     }
 
     {
@@ -830,6 +903,115 @@ bool WebRadioInterface::send_mux_json(Socket& s)
         return false;
     }
     return true;
+}
+
+bool WebRadioInterface::send_journaline_json(Socket& s)
+{
+    // JSON-Escaping: alle non-ASCII und Steuerzeichen als \uXXXX
+    auto json_escape = [](const std::string& in) -> std::string {
+        std::string out;
+        out.reserve(in.size() * 2);
+        for (unsigned char c : in) {
+            switch (c) {
+                case '"':  out += "\\\""; break;
+                case '\\': out += "\\\\"; break;
+                case '\n': out += "\\n";  break;
+                case '\r': out += "\\r";  break;
+                case '\t': out += "\\t";  break;
+                default:
+                    if (c < 0x20 || c > 0x7E) {
+                        char buf[8];
+                        snprintf(buf, sizeof(buf), "\\u%04x", c);
+                        out += buf;
+                    } else {
+                        out += static_cast<char>(c);
+                    }
+            }
+        }
+        return out;
+    };
+
+    bool present = false;
+    std::string service_type;
+    uint16_t apptype = 0;
+    std::vector<WebProgrammeHandler::journaline_t> objects;
+
+    {
+        lock_guard<mutex> rlock(rx_mut);
+        if (rx) {
+            const auto jinfo = rx->getJournalineInfo();
+            present  = jinfo.present;
+            apptype  = jinfo.apptype;
+            if (jinfo.apptype == 0x44a)      service_type = "journaline";
+            else if (jinfo.apptype == 0x004) service_type = "tpeg";
+            else if (jinfo.apptype == 0x007) service_type = "epg";
+            else if (jinfo.apptype != 0)     service_type = "unknown";
+            if (journaline_ph) {
+                objects = journaline_ph->getJournalineObjects();
+            }
+        }
+    }
+
+    std::string json = "{\"present\":";
+    json += present ? "true" : "false";
+    json += ",\"service_type\":\"" + service_type + "\"";
+    json += ",\"apptype\":" + to_string(apptype);
+    json += ",\"objects\":[";
+
+    bool first = true;
+    for (const auto& obj : objects) {
+        if (!first) json += ",";
+        first = false;
+        json += "{";
+        json += "\"object_id\":"  + to_string(obj.object_id) + ",";
+        json += "\"type\":"        + to_string(obj.type) + ",";
+        json += "\"title\":\""    + json_escape(obj.title) + "\",";
+        json += "\"body\":\""     + json_escape(obj.body)  + "\",";
+        json += "\"received\":"   + to_string(
+                    chrono::system_clock::to_time_t(obj.time));
+        json += "}";
+    }
+    json += "]}";
+
+    if (!send_http_response(s, http_ok, "", http_contenttype_json)) return false;
+    ssize_t ret = s.send(json.c_str(), json.size(), MSG_NOSIGNAL);
+    return ret != -1;
+}
+
+bool WebRadioInterface::send_rxlog_json(Socket& s)
+{
+    std::deque<RxLogEntry> entries;
+    {
+        lock_guard<mutex> lock(rxlog_mutex_);
+        entries = rxlog_;
+    }
+
+    std::string json = "{\"entries\":[";
+    bool first = true;
+    for (const auto& e : entries) {
+        if (!first) json += ",";
+        first = false;
+        std::string safe_title;
+        for (unsigned char c : e.title) {
+            if (c == '"') { safe_title += "\\\""; }
+            else if (c == '\\') { safe_title += "\\\\"; }
+            else if (c >= 0x20 && c < 0x7F) { safe_title += c; }
+            else { char buf[8]; snprintf(buf,sizeof(buf),"\\u%04x",c); safe_title+=buf; }
+        }
+        json += "{";
+        json += "\"received\":"       + to_string(e.received) + ",";
+        json += "\"service_type\":\"" + e.service_type + "\",";
+        json += "\"apptype\":"        + to_string(e.apptype) + ",";
+        json += "\"object_id\":"      + to_string(e.object_id) + ",";
+        json += "\"obj_type\":"       + to_string(e.obj_type) + ",";
+        json += "\"title\":\""        + safe_title + "\"";
+        json += "}";
+    }
+    json += "]}";
+
+    if (!send_http_response(s, http_ok, "", http_contenttype_json)) return false;
+    ssize_t ret = s.send(json.c_str(), json.size(), MSG_NOSIGNAL);
+    return ret != -1;
 }
 
 bool WebRadioInterface::send_mux_playlist(Socket& s)

@@ -447,3 +447,31 @@ void WebProgrammeHandler::onPADLengthError(size_t announced_xpad_len, size_t xpa
     xpad_error.xpad_len = xpad_len;
 }
 
+void WebProgrammeHandler::onJournalineData(
+        uint16_t           object_id,
+        uint8_t            type,
+        const std::string& title,
+        const std::string& body)
+{
+    std::unique_lock<std::mutex> lock(journaline_mutex_);
+    journaline_t obj;
+    obj.object_id = object_id;
+    obj.type      = type;
+    obj.title     = title;
+    obj.body      = body;
+    obj.time      = chrono::system_clock::now();
+    journaline_objects_[object_id] = std::move(obj);
+}
+
+std::vector<WebProgrammeHandler::journaline_t>
+WebProgrammeHandler::getJournalineObjects() const
+{
+    std::unique_lock<std::mutex> lock(journaline_mutex_);
+    std::vector<journaline_t> result;
+    result.reserve(journaline_objects_.size());
+    for (const auto& kv : journaline_objects_) {
+        result.push_back(kv.second);
+    }
+    return result;
+}
+

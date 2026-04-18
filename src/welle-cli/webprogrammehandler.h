@@ -81,6 +81,16 @@ class WebProgrammeHandler : public ProgrammeHandlerInterface {
             size_t num_rsErrors = 0;
             size_t num_aacErrors = 0;
         };
+
+        // Journaline object (ETSI TS 102 979)
+        struct journaline_t {
+            uint16_t    object_id = 0;
+            uint8_t     type      = 0;  // 1=NewsService, 2=NewsItem, 3=Menu
+            std::string title;
+            std::string body;
+            std::chrono::time_point<std::chrono::system_clock> time;
+        };
+
     private:
         uint32_t serviceId;
         const OutputCodec codec;
@@ -107,6 +117,10 @@ class WebProgrammeHandler : public ProgrammeHandlerInterface {
         xpad_error_t xpad_error;
 
         audiolevels_t audiolevels;
+
+        // Journaline objects, keyed by object_id
+        mutable std::mutex journaline_mutex_;
+        std::map<uint16_t, journaline_t> journaline_objects_;
 
     public:
         int rate = 0;
@@ -135,6 +149,8 @@ class WebProgrammeHandler : public ProgrammeHandlerInterface {
             std::chrono::time_point<std::chrono::system_clock> last_changed; };
         mot_t getMOT() const;
 
+        std::vector<journaline_t> getJournalineObjects() const;
+
         xpad_error_t getXPADErrors() const;
         audiolevels_t getAudioLevels() const;
         errorcounters_t getErrorCounters() const;
@@ -147,5 +163,10 @@ class WebProgrammeHandler : public ProgrammeHandlerInterface {
         virtual void onNewDynamicLabel(const std::string& label) override;
         virtual void onMOT(const mot_file_t& mot_file) override;
         virtual void onPADLengthError(size_t announced_xpad_len, size_t xpad_len) override;
+        virtual void onJournalineData(
+                uint16_t           object_id,
+                uint8_t            type,
+                const std::string& title,
+                const std::string& body) override;
 };
 

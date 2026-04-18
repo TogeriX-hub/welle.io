@@ -65,6 +65,15 @@ class FIBProcessor {
         };
         AsaState getAsaState() const;
 
+        // Journaline service info – set from FIG 0/13 (appType 0x44a)
+        struct JournalineInfo {
+            bool     present    = false;
+            uint32_t service_id = 0;
+            uint16_t scid       = 0;
+            uint16_t apptype    = 0;   // 0x44a=Journaline, 0x003=TPEG, 0x007=EPG etc.
+        };
+        JournalineInfo getJournalineInfo() const;
+
     private:
         RadioControllerInterface& myRadioInterface;
         Service *findServiceId(uint32_t serviceId);
@@ -142,6 +151,12 @@ class FIBProcessor {
         std::time_t asaLastChange = 0;
         bool asaHasRegion = false;
         uint8_t asaRegionId = 0;
+
+        // Journaline state, updated by FIG 0/13
+        bool     journalinePresent = false;
+        uint32_t journalineSId     = 0;
+        uint16_t journalineScId    = 0;
+        uint16_t journalineAppType = 0;
         uint16_t ensembleId = 0;
         uint8_t ensembleEcc = 0;
         DabLabel ensembleLabel;

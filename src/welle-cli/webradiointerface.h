@@ -114,6 +114,12 @@ class WebRadioInterface : public RadioControllerInterface {
         // Generate and send the mux.json
         bool send_mux_json(Socket& s);
 
+        // Generate and send /journaline.json
+        bool send_journaline_json(Socket& s);
+
+        // Generate and send /rxlog.json (last 50 raw packet objects for debugging)
+        bool send_rxlog_json(Socket& s);
+
         // Generate and send a m3u playlist with all services
         bool send_mux_playlist(Socket& s);
 
@@ -176,6 +182,26 @@ class WebRadioInterface : public RadioControllerInterface {
 
         // ASA state, guarded by data_mut
         AsaJson last_asa;
+
+        // Journaline decoding started flag (guarded by rx_mut)
+        bool journaline_decode_started = false;
+
+        // Dedicated handler for the Journaline/packet-mode service
+        // (packet services are not in phs which only holds audio services)
+        std::unique_ptr<WebProgrammeHandler> journaline_ph;
+
+        // RxLog: last 50 raw packet objects (all types) for debugging
+        struct RxLogEntry {
+            std::time_t  received  = 0;
+            std::string  service_type;
+            uint16_t     apptype   = 0;
+            uint16_t     object_id = 0;
+            uint8_t      obj_type  = 0;
+            std::string  title;
+        };
+        mutable std::mutex         rxlog_mutex_;
+        std::deque<RxLogEntry>     rxlog_;
+        static constexpr size_t    RXLOG_MAX = 50;
 
         struct pending_message_t {
             message_level_t level;
