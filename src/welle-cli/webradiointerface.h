@@ -45,6 +45,7 @@
 #include "various/channels.h"
 #include "webprogrammehandler.h"
 #include "radio-receiver-options.h"
+#include "welle-cli/jsonconvert.h"
 
 class CVirtualInput; // from input/virtual_input.h
 class RadioReceiver; // from backend/radio_receiver.h
@@ -172,6 +173,9 @@ class WebRadioInterface : public RadioControllerInterface {
         int last_fine_correction = 0;
         int last_coarse_correction = 0;
         dab_date_time_t last_dateTime;
+
+        // ASA state, guarded by data_mut
+        AsaJson last_asa;
 
         struct pending_message_t {
             message_level_t level;

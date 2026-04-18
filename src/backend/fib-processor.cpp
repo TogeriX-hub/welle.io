@@ -692,21 +692,28 @@ void FIBProcessor::FIG0Extension19(uint8_t *d)
         uint8_t subChId     = getBits_6 (d, offset + 26);
 
         uint16_t aswFlags = getBits (d, offset + 8, 16);
-        //     std::clog << "fib-processor:" <<
-        //            "%s %s Announcement %d for Cluster %2u on SubCh %2u ",
-        //                ((new_flag==1)?"new":"old"),
-        //                ((region_flag==1)?"regional":""),
-        //                aswFlags, clusterId,subChId) << std::endl;
+
+        // Bit 8 of aswFlags is the Emergency Warning flag (ETSI TS 104 089).
+        // new_flag=1 means the alarm just started, new_flag=0 means it was cancelled.
+        if (aswFlags & 0x0100) {
+            std::lock_guard<std::mutex> lock(mutex);
+            asaActive    = new_flag;
+            asaAswFlags  = aswFlags;
+            asaClusterId = clusterId;
+            asaHasRegion = region_flag;
+            asaRegionId  = region_flag ? getBits_6(d, offset + 34) : 0;
+            asaLastChange = std::chrono::system_clock::to_time_t(
+                    std::chrono::system_clock::now());
+        }
+
         if (region_flag) {
             region_Id_Lower = getBits_6 (d, offset + 34);
             offset += 40;
-            //           fprintf(stderr,"for region %u",region_Id_Lower);
         }
         else {
             offset += 32;
         }
 
-        //     fprintf(stderr,"\n");
         (void)clusterId;
         (void)new_flag;
         (void)subChId;
@@ -1336,4 +1343,17 @@ std::chrono::system_clock::time_point FIBProcessor::getTimeLastFCT0Frame() const
 {
     std::lock_guard<std::mutex> lock(mutex);
     return timeLastFCT0Frame;
+}
+
+FIBProcessor::AsaState FIBProcessor::getAsaState() const
+{
+    std::lock_guard<std::mutex> lock(mutex);
+    AsaState s;
+    s.active      = asaActive;
+    s.asw_flags   = asaAswFlags;
+    s.cluster_id  = asaClusterId;
+    s.last_change = asaLastChange;
+    s.has_region  = asaHasRegion;
+    s.region_id   = asaRegionId;
+    return s;
 }

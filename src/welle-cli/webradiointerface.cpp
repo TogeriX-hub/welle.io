@@ -282,6 +282,7 @@ void WebRadioInterface::retune(const string& channel)
             last_snr = 0;
             last_fine_correction = 0;
             last_coarse_correction = 0;
+            last_asa = {};
         }
 
         synced = false;
@@ -797,6 +798,19 @@ bool WebRadioInterface::send_mux_json(Socket& s)
         mux_json.demodulator_timelastfct0frame = rx->getReceiverStats().timeLastFCT0Frame;
 
         mux_json.tii = getTiiStats();
+
+        // ASA (Automatic Safety Alert)
+        {
+            const auto asa = rx->getAsaState();
+            last_asa.active      = asa.active;
+            last_asa.is_test     = false;  // FIG 0/19 has no separate test flag
+            last_asa.asw_flags   = asa.asw_flags;
+            last_asa.cluster_id  = asa.cluster_id;
+            last_asa.last_change = asa.last_change;
+            last_asa.has_region  = asa.has_region;
+            last_asa.region_id   = asa.region_id;
+        }
+        mux_json.asa = last_asa;
     }
 
     {

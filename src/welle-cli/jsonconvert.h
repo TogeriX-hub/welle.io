@@ -128,6 +128,16 @@ struct PeakJson {
     float value = -1e30f;
 };
 
+struct AsaJson {
+    bool active = false;
+    bool is_test = false;
+    uint16_t asw_flags = 0;
+    uint8_t cluster_id = 0;
+    std::time_t last_change = 0;
+    bool has_region = false;
+    uint8_t region_id = 0;   // 0 = no region restriction
+};
+
 struct MuxJson {
     ReceiverJson receiver;
     EnsembleJson ensemble;
@@ -142,6 +152,9 @@ struct MuxJson {
 
     std::list<tii_measurement_t> tii;
     std::vector<PeakJson> cir_peaks;
+
+    // ASA (Automatic Safety Alert / Emergency Warning)
+    AsaJson asa;
 };
 
 std::string build_mux_json(const MuxJson& mux);

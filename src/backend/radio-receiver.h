@@ -102,6 +102,9 @@ class RadioReceiver {
 
         RadioReceiverStats getReceiverStats() const;
 
+        // ASA – Automatic Safety Alert
+        FIBProcessor::AsaState getAsaState() const;
+
     private:
         bool playProgramme(ProgrammeHandlerInterface& handler,
                 const Service& s,

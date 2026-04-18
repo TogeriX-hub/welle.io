@@ -228,3 +228,8 @@ RadioReceiverStats RadioReceiver::getReceiverStats() const
     s.timeLastFCT0Frame = ficHandler.fibProcessor.getTimeLastFCT0Frame();
     return s;
 }
+
+FIBProcessor::AsaState RadioReceiver::getAsaState() const
+{
+    return ficHandler.fibProcessor.getAsaState();
+}

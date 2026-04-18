@@ -1,27 +1,27 @@
 /*
- *    Copyright (C) 2020
- *    Matthias P. Braendli (matthias.braendli@mpb.li)
- *
- *    This file is part of the welle.io.
- *    Many of the ideas as implemented in welle.io are derived from
- *    other work, made available through the GNU general Public License.
- *    All copyrights of the original authors are recognized.
- *
- *    welle.io is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; either version 2 of the License, or
- *    (at your option) any later version.
- *
- *    welle.io is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
- *
- *    You should have received a copy of the GNU General Public License
- *    along with welle.io; if not, write to the Free Software
- *    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
- */
+*    Copyright (C) 2020
+*    Matthias P. Braendli (matthias.braendli@mpb.li)
+*
+*    This file is part of the welle.io.
+*    Many of the ideas as implemented in welle.io are derived from
+*    other work, made available through the GNU general Public License.
+*    All copyrights of the original authors are recognized.
+*
+*    welle.io is free software; you can redistribute it and/or modify
+*    it under the terms of the GNU General Public License as published by
+*    the Free Software Foundation; either version 2 of the License, or
+*    (at your option) any later version.
+*
+*    welle.io is distributed in the hope that it will be useful,
+*    but WITHOUT ANY WARRANTY; without even the implied warranty of
+*    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+*    GNU General Public License for more details.
+*
+*    You should have received a copy of the GNU General Public License
+*    along with welle.io; if not, write to the Free Software
+*    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+*
+*/
 
 #include "welle-cli/jsonconvert.h"
 #include "libs/json.hpp"
@@ -208,6 +208,20 @@ static void to_json(nlohmann::json& j, const PeakJson& peak)
         {"value", 10.0f * log10(peak.value)}};
 }
 
+// ASA (Automatic Safety Alert / Emergency Warning)
+static void to_json(nlohmann::json& j, const AsaJson& asa) {
+    j = nlohmann::json{
+        {"active", asa.active},
+        {"is_test", asa.is_test},
+        {"status", asa.is_test ? "test" : "actual"},
+        {"asw_flags", asa.asw_flags},
+        {"emergency_warning", (asa.asw_flags & 0x0100) != 0},
+        {"cluster_id", asa.cluster_id},
+        {"last_change", asa.last_change},
+        {"has_region", asa.has_region},
+        {"region_id", asa.region_id}
+    };
+}
 
 static void to_json(nlohmann::json& j, const MuxJson& mux) {
     j = nlohmann::json{
@@ -217,7 +231,8 @@ static void to_json(nlohmann::json& j, const MuxJson& mux) {
         {"utctime", mux.utctime},
         {"messages", mux.messages},
         {"tii", mux.tii},
-        {"cir_peaks", mux.cir_peaks}
+        {"cir_peaks", mux.cir_peaks},
+        {"asa", mux.asa}
     };
 
     j["demodulator"]["fic"]["numcrcerrors"] = mux.demodulator_fic_numcrcerrors;

@@ -54,6 +54,17 @@ class FIBProcessor {
         Subchannel getSubchannel(const ServiceComponent& sc) const;
         std::chrono::system_clock::time_point getTimeLastFCT0Frame() const;
 
+        // ASA (Automatic Safety Alert) – set from FIG 0/19
+        struct AsaState {
+            bool active = false;
+            uint16_t asw_flags = 0;
+            uint8_t cluster_id = 0;
+            std::time_t last_change = 0;
+            bool has_region = false;
+            uint8_t region_id = 0;   // 0 = no region restriction
+        };
+        AsaState getAsaState() const;
+
     private:
         RadioControllerInterface& myRadioInterface;
         Service *findServiceId(uint32_t serviceId);
@@ -123,6 +134,14 @@ class FIBProcessor {
         bool timeOffsetReceived = false;
         dab_date_time_t dateTime = {};
         mutable std::mutex mutex;
+
+        // ASA state, updated by FIG 0/19
+        bool asaActive = false;
+        uint16_t asaAswFlags = 0;
+        uint8_t asaClusterId = 0;
+        std::time_t asaLastChange = 0;
+        bool asaHasRegion = false;
+        uint8_t asaRegionId = 0;
         uint16_t ensembleId = 0;
         uint8_t ensembleEcc = 0;
         DabLabel ensembleLabel;
