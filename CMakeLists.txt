@@ -233,6 +233,7 @@ set(backend_sources
     src/backend/eep-protection.cpp
     src/backend/fib-processor.cpp
     src/backend/fic-handler.cpp
+    src/backend/dab-packet.cpp
     src/backend/msc-handler.cpp
     src/backend/freq-interleaver.cpp
     src/backend/ofdm-decoder.cpp

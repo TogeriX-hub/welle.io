@@ -26,6 +26,7 @@
 #include "msc-handler.h"
 #include "dab-virtual.h"
 #include "dab-audio.h"
+#include "dab-packet.h"
 
 //  Interface program for processing the MSC.
 //  Merely a dispatcher for the selected service
@@ -102,6 +103,37 @@ bool MscHandler::addSubchannel(
     return true;
 }
 
+bool MscHandler::addPacketSubchannel(
+        ProgrammeHandlerInterface& handler,
+        const Subchannel& sub,
+        uint16_t packet_address)
+{
+    std::lock_guard<std::mutex> lock(mutex);
+
+    // Check not already registered
+    for (const auto& stream : streams) {
+        if (stream.subCh.subChId == sub.subChId) {
+            return true;
+        }
+    }
+
+    SelectedStream s(handler,
+                     AudioServiceComponentType::Unknown,
+                     "",
+                     sub);
+    s.isPacketMode = true;
+    s.packetHandler = std::make_shared<DabPacket>(
+        sub.length * CUSize,
+        sub.bitrate(),
+        sub.protectionSettings,
+        packet_address,
+        handler);
+
+    streams.push_back(std::move(s));
+    work_to_be_done = true;
+    return true;
+}
+
 bool MscHandler::removeSubchannel(const Subchannel& sub)
 {
     std::lock_guard<std::mutex> lock(mutex);
@@ -148,11 +180,17 @@ void MscHandler::processMscBlock(const softbit_t *fbits, int16_t blkno)
     for (auto& stream : streams) {
         softbit_t *myBegin = &cifVector[stream.subCh.startAddr * CUSize];
 
-        if (stream.dabHandler) {
-            (void)stream.dabHandler->process(myBegin, stream.subCh.length * CUSize);
-        }
-        else {
-            throw std::logic_error("No dabHandler!");
+        if (stream.isPacketMode) {
+            if (stream.packetHandler) {
+                stream.packetHandler->process(myBegin, stream.subCh.length * CUSize);
+            }
+        } else {
+            if (stream.dabHandler) {
+                (void)stream.dabHandler->process(myBegin, stream.subCh.length * CUSize);
+            }
+            else {
+                throw std::logic_error("No dabHandler!");
+            }
         }
     }
 }

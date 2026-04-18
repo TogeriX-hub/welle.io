@@ -138,6 +138,22 @@ struct AsaJson {
     uint8_t region_id = 0;   // 0 = no region restriction
 };
 
+// Journaline object for JSON serialisation (ETSI TS 102 979)
+struct JournalineObjectJson {
+    uint16_t    object_id = 0;
+    uint8_t     type      = 0;   // 1=NewsService, 2=NewsItem, 3=Menu
+    std::string title;
+    std::string body;
+    std::time_t received  = 0;
+};
+
+struct JournalineJson {
+    bool                              present = false;
+    std::string                       service_type;  // "journaline", "tpeg", "epg", "unknown"
+    uint16_t                          apptype = 0;
+    std::vector<JournalineObjectJson> objects;
+};
+
 struct MuxJson {
     ReceiverJson receiver;
     EnsembleJson ensemble;
@@ -155,6 +171,9 @@ struct MuxJson {
 
     // ASA (Automatic Safety Alert / Emergency Warning)
     AsaJson asa;
+
+    // Journaline text service (ETSI TS 102 979)
+    JournalineJson journaline;
 };
 
 std::string build_mux_json(const MuxJson& mux);

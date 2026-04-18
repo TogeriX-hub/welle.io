@@ -233,3 +233,42 @@ FIBProcessor::AsaState RadioReceiver::getAsaState() const
 {
     return ficHandler.fibProcessor.getAsaState();
 }
+
+FIBProcessor::JournalineInfo RadioReceiver::getJournalineInfo() const
+{
+    return ficHandler.fibProcessor.getJournalineInfo();
+}
+
+bool RadioReceiver::addJournalineToDecode(ProgrammeHandlerInterface& handler)
+{
+    const auto info = ficHandler.fibProcessor.getJournalineInfo();
+    if (!info.present) {
+        cerr << "RadioReceiver: No Journaline service detected yet\n";
+        return false;
+    }
+
+    Service svc = ficHandler.fibProcessor.getService(info.service_id);
+    if (svc.serviceId == 0) {
+        cerr << "RadioReceiver: Journaline service 0x" << hex
+             << info.service_id << dec << " not found\n";
+        return false;
+    }
+
+    const auto comps = ficHandler.fibProcessor.getComponents(svc);
+    for (const auto& sc : comps) {
+        if (sc.transportMode() == TransportMode::PacketData) {
+            const auto& subch = ficHandler.fibProcessor.getSubchannel(sc);
+            if (subch.valid()) {
+                clog << "RadioReceiver: Adding Journaline subchannel "
+                     << subch.subChId
+                     << " packetAddress=" << sc.packetAddress << "\n";
+                return mscHandler.addPacketSubchannel(
+                        handler, subch,
+                        static_cast<uint16_t>(sc.packetAddress));
+            }
+        }
+    }
+
+    cerr << "RadioReceiver: Journaline PacketData subchannel not found\n";
+    return false;
+}

@@ -40,6 +40,7 @@
 #include "dab-constants.h"
 #include "ringbuffer.h"
 #include "radio-controller.h"
+#include "dab-packet.h"
 
 class DabVirtual;
 
@@ -56,6 +57,12 @@ class MscHandler
                 AudioServiceComponentType ascty,
                 const std::string& dumpFileName,
                 const Subchannel& sub);
+
+        // Add a packet-mode subchannel (e.g. Journaline, appType 0x44a)
+        bool addPacketSubchannel(
+                ProgrammeHandlerInterface& handler,
+                const Subchannel& sub,
+                uint16_t packet_address);
 
         bool removeSubchannel(const Subchannel& sub);
 
@@ -81,6 +88,10 @@ class MscHandler
             const Subchannel subCh;
 
             std::shared_ptr<DabVirtual> dabHandler;
+
+            // For packet-mode subchannels (Journaline etc.)
+            bool isPacketMode = false;
+            std::shared_ptr<DabPacket> packetHandler;
         };
 
         std::mutex mutex;

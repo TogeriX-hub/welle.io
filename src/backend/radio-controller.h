@@ -175,6 +175,22 @@ class ProgrammeHandlerInterface {
          * and effective X-PAD length.
          */
         virtual void onPADLengthError(size_t announced_xpad_len, size_t xpad_len) = 0;
+
+        /* A Journaline object was decoded from the DAB packet-mode service.
+         * ETSI TS 102 979 – Journaline transport and object format.
+         * object_id : unique identifier of the Journaline object
+         * type      : 1=NewsService (root), 2=NewsItem (text), 3=Menu
+         * title     : UTF-8 headline / title
+         * body      : UTF-8 body text (non-empty for NewsItems)
+         *
+         * Not pure virtual – default is no-op so existing implementations
+         * (e.g. CLI handlers that don't care about Journaline) don't break.
+         */
+        virtual void onJournalineData(
+                uint16_t           object_id,
+                uint8_t            type,
+                const std::string& title,
+                const std::string& body) { (void)object_id; (void)type; (void)title; (void)body; }
 };
 
 enum class DeviceParam {
