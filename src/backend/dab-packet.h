@@ -3,9 +3,12 @@
  *    Part of welle.io fork by Tobias / TogeriX-hub
  *
  *    Decodes a DAB packet-mode subchannel (e.g. Journaline, DSCTy=0x44a).
- *    Mirrors the structure of DabAudio: softbits → deinterleave →
- *    EEP Viterbi deconvolution → energy dispersal → packet assembly →
- *    MSC data group → ProgrammeHandlerInterface::onJournalineData()
+ *    Pipeline: softbits → deinterleave → EEP Viterbi → energy dispersal →
+ *    packet assembly → Fraunhofer DAB datagroup decoder → NML parser →
+ *    ProgrammeHandlerInterface::onJournalineData()
+ *
+ *    Uses the Fraunhofer NewsService Journaline(R) Decoder for NML parsing.
+ *    "Features NewsService Journaline(R) decoder technology by Fraunhofer IIS"
  *
  *    GPL v2, same as welle.io.
  */
@@ -24,17 +27,13 @@
 #include "eep-protection.h"
 #include "energy_dispersal.h"
 #include "ringbuffer.h"
+#include "dabdatagroupdecoder.h"
 
 // Forward declaration
 class Protection;
 
 class DabPacket {
 public:
-    // fragmentSize = subchannel.length * CUSize
-    // bitRate      = subchannel.bitrate()
-    // protection   = subchannel.protectionSettings
-    // packetAddress= ServiceComponent.packetAddress (10-bit DAB packet address)
-    // handler      = callback target (onJournalineData will be called)
     DabPacket(
             int16_t              fragmentSize,
             int16_t              bitRate,
@@ -45,23 +44,20 @@ public:
     ~DabPacket();
 
     // Called by MscHandler with raw softbits from the CIF
-    // (same signature as DabVirtual::process)
     int32_t process(const softbit_t* v, int16_t cnt);
 
 private:
-    // Background processing thread (mirrors DabAudio::run)
     void run();
-
-    // Packet assembly (mirrors qt-dab data-processor handlePacket logic)
     void handleDecodedFrame(const std::vector<uint8_t>& bits);
     void handlePacket(const uint8_t* bits, size_t num_bits);
     void dispatchDataGroup(const std::vector<uint8_t>& bits);
 
-    // Extract n bits from bit-vector starting at offset, return as uint32_t
-    static uint32_t getBits(const uint8_t* bits, size_t offset, size_t n);
-
-    // CRC-16/CCITT check over bit-vector (len in bits)
-    static bool checkCRC(const uint8_t* bits, size_t len_bits);
+    // Fraunhofer datagroup decoder callback (static → passed as C function ptr)
+    static void onDataGroup(
+            const DAB_DATAGROUP_DECODER_msc_datagroup_header_t* header,
+            unsigned long len,
+            const unsigned char* buf,
+            void* arg);
 
     ProgrammeHandlerInterface& handler_;
     uint16_t                   packetAddress_;
@@ -77,7 +73,7 @@ private:
     std::atomic<bool>          running_;
     std::thread                thread_;
 
-    // Interleaver state (identical to DabAudio)
+    // Interleaver state
     std::vector<softbit_t>     interleaveData_[16];
     int16_t                    interleaverIndex_   = 0;
     int16_t                    countForInterleaver_= 0;
@@ -88,5 +84,8 @@ private:
     // Packet assembly state
     bool                       assembling_    = false;
     int16_t                    lastCntIdx_    = -1;
-    std::vector<uint8_t>       series_;        // accumulated bits of current datagroup
+    std::vector<uint8_t>       series_;
+
+    // Fraunhofer DAB datagroup decoder instance
+    DAB_DATAGROUP_DECODER_t    fraunhoferDecoder_ = nullptr;
 };

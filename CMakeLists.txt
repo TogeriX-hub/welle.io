@@ -208,6 +208,7 @@ include_directories(
     ${CMAKE_CURRENT_BINARY_DIR}
     src
     src/backend
+    src/backend/data/journaline
     src/output
     src/various
     src/input
@@ -234,6 +235,9 @@ set(backend_sources
     src/backend/fib-processor.cpp
     src/backend/fic-handler.cpp
     src/backend/dab-packet.cpp
+    src/backend/data/journaline/NML.cpp
+    src/backend/data/journaline/newsobject.cpp
+    src/backend/data/journaline/dabdgdec_impl.c
     src/backend/msc-handler.cpp
     src/backend/freq-interleaver.cpp
     src/backend/ofdm-decoder.cpp
@@ -474,6 +478,7 @@ if(BUILD_WELLE_CLI AND NOT ANDROID)
       SET_TARGET_PROPERTIES(${cliExecutableName} PROPERTIES LINK_FLAGS "-fno-omit-frame-pointer -fsanitize=address")
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
 
+    find_package(ZLIB REQUIRED)
     target_link_libraries (${cliExecutableName}
       ${LIBRTLSDR_LIBRARIES}
       ${LIBAIRSPY_LIBRARIES}
@@ -485,6 +490,7 @@ if(BUILD_WELLE_CLI AND NOT ANDROID)
       ${MPG123_LIBRARIES}
       ${FLACPP_LIBRARIES}
       Threads::Threads
+      ZLIB::ZLIB
     )
 
     find_program(RESOURCE_COMPILER xxd)

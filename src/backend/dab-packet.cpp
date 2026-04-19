@@ -13,14 +13,24 @@
 #include "eep-protection.h"
 #include <iostream>
 #include <chrono>
+#include <sys/time.h>
+
+// ---------------------------------------------------------------------------
+// Fraunhofer NewsService Journaline(R) Decoder
+// Copyright (c) 2003, 2001-2014 Fraunhofer IIS, Erlangen – GPL v2
+// Used for NON-COMMERCIAL purposes only (WarnBridge is open-source/non-commercial)
+// "Features NewsService Journaline(R) decoder technology by Fraunhofer IIS"
+// ---------------------------------------------------------------------------
+#include "newsobject.h"
+#include "NML.h"
+#include "dabdatagroupdecoder.h"
 
 // Interleave map – identical to DabAudio
 static const int16_t interleaveMap[] = {0,8,4,12,2,10,6,14,1,9,5,13,3,11,7,15};
 
 // ---------------------------------------------------------------------------
-// CRC-16/CCITT over packed bytes (poly=0x1021, init=0xFFFF)
-// Used for DAB packet CRC check (ETSI EN 300 401 §B.1)
-// Input: packed byte array, length in bytes (CRC is last 2 bytes)
+// CRC-16/CCITT – used for DAB PACKET level CRC (ETSI EN 300 401 §5.3.2.1)
+// Note: the DataGroup CRC is handled separately by the Fraunhofer decoder.
 // ---------------------------------------------------------------------------
 static uint16_t crc16_bytes(const uint8_t* data, size_t len)
 {
@@ -31,7 +41,7 @@ static uint16_t crc16_bytes(const uint8_t* data, size_t len)
             crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : (crc << 1);
         }
     }
-    return crc ^ 0xFFFF;  // DAB uses inverted CRC per ETSI EN 300 401 §B.1
+    return crc ^ 0xFFFF;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +73,9 @@ DabPacket::DabPacket(
         interleaveData_[i].resize(fragmentSize);
     }
 
+    // Fraunhofer DAB datagroup decoder
+    fraunhoferDecoder_ = DAB_DATAGROUP_DECODER_createDec(&DabPacket::onDataGroup, this);
+
     thread_ = std::thread(&DabPacket::run, this);
 }
 
@@ -72,6 +85,10 @@ DabPacket::~DabPacket()
     dataAvailable_.notify_all();
     if (thread_.joinable()) {
         thread_.join();
+    }
+    if (fraunhoferDecoder_) {
+        DAB_DATAGROUP_DECODER_deleteDec(fraunhoferDecoder_);
+        fraunhoferDecoder_ = nullptr;
     }
 }
 
@@ -281,21 +298,15 @@ void DabPacket::handlePacket(const uint8_t* bits, size_t num_bits)
 // dispatchDataGroup
 //
 // series_ contains the complete MSC data group as a bit-vector (0/1 uint8_t).
-// Convert to bytes and parse the Journaline data group header +  object.
+// Converts to bytes, then feeds into the Fraunhofer DAB datagroup decoder
+// which handles CRC, header parsing, and passes valid Journaline data groups
+// to the NML parser.
 //
-// MSC data group header (ETSI EN 300 401 §5.3.3.1 / dabdatagroupdecoder.h):
-//   bit 0:     extension_flag
-//   bit 1:     crc_flag
-//   bit 2:     segment_flag
-//   bit 3:     user_access_flag
-//   bits 4..7: data_group_type
-//   bits 8..11: continuity_index
-//   bits 12..15: repetition_index
-//   [optional extension: 16 bits if extension_flag=1]
-//   [optional CRC: 16 bits at end if crc_flag=1, over everything before CRC]
-//   payload: Journaline NML data
-//
-// Journaline uses data_group_type=0 ("general data") per dabdatagroupdecoder.h
+// The Fraunhofer decoder expects:
+//   - complete MSC data group (header + data field + optional CRC)
+//   - data_group_type=0 (general data, Journaline uses this)
+//   - crc_flag=1 (Journaline data groups always have CRC)
+//   - segment_flag=0 (Journaline is never segmented)
 // ---------------------------------------------------------------------------
 void DabPacket::dispatchDataGroup(const std::vector<uint8_t>& bits)
 {
@@ -310,78 +321,82 @@ void DabPacket::dispatchDataGroup(const std::vector<uint8_t>& bits)
         bytes[i] = b;
     }
 
-    if (bytes.size() < 2) return;
+    // Feed into Fraunhofer DAB datagroup decoder.
+    // It checks CRC, validates header, and calls our callback if valid.
+    DAB_DATAGROUP_DECODER_putData(fraunhoferDecoder_, bytes.size(), bytes.data());
+}
 
-    // Parse MSC data group header
-    bool     extension_flag   = (bytes[0] >> 7) & 1;
-    bool     crc_flag         = (bytes[0] >> 6) & 1;
-    uint8_t  dg_type          = bytes[0] & 0x0F;
+// ---------------------------------------------------------------------------
+// Static callback – called by Fraunhofer decoder for each valid data group.
+// buf/len = the MSC data field (after header, CRC stripped).
+// This is the raw NML object: bytes 0-1 = object_id, byte 2 = type/flags,
+// byte 3+ = (possibly compressed) content.
+// ---------------------------------------------------------------------------
+void DabPacket::onDataGroup(
+        const DAB_DATAGROUP_DECODER_msc_datagroup_header_t* /*header*/,
+        unsigned long len,
+        const unsigned char* buf,
+        void* arg)
+{
+    DabPacket* self = static_cast<DabPacket*>(arg);
 
-    size_t offset = 2;
+    // Wrap in a timeval for NewsObject (only used internally, not exposed)
+    struct timeval tv = {};
+    gettimeofday(&tv, nullptr);
 
-    // Optional extension field
-    if (extension_flag) {
-        if (offset + 2 > bytes.size()) return;
-        offset += 2;
-    }
+    // NewsObject validates and stores the raw NML bytes
+    NewsObject newsObj(len, buf, &tv);
 
-    // CRC check if present (CRC covers all bytes except the 2-byte CRC itself)
-    if (crc_flag) {
-        if (bytes.size() < offset + 2) return;
-        size_t crc_data_len = bytes.size() - 2;
-        uint16_t crc_calc = crc16_bytes(bytes.data(), crc_data_len);
-        uint16_t crc_field = (static_cast<uint16_t>(bytes[bytes.size() - 2]) << 8)
-                            | bytes[bytes.size() - 1];
-        if (crc_calc != crc_field) {
-            std::clog << "DabPacket: data group CRC error\n";
-            return;
+    // Copy NML for the factory
+    NML::RawNewsObject_t rno;
+    unsigned long nml_len = 0;
+    newsObj.copyNml(&nml_len, rno.nml);
+    rno.nml_len = static_cast<unsigned short>(nml_len);
+    rno.extended_header_len = 0;
+
+    // Parse NML using Fraunhofer factory (handles compression, 0x1a/0x1b
+    // data sections, title/body/menu structure correctly)
+    RemoveNMLEscapeSequences escHandler;
+    NMLFactory factory;
+    std::shared_ptr<NML> nml = factory.CreateNML(rno, &escHandler);
+
+    if (!nml) {
+        if (nml_len >= 2) {
+            uint16_t oid = (static_cast<uint16_t>(buf[0]) << 8) | buf[1];
+            uint8_t  raw_type = (nml_len >= 3) ? (buf[2] >> 5) : 0;
+            self->handler_.onJournalineData(oid, raw_type, "JML-error", "");
         }
-        bytes.resize(crc_data_len);  // strip CRC
+        return;
     }
 
-    // Journaline uses data_group_type = 0 ("general data")
-    if (dg_type != 0) return;
+    // isValid() is false for TITLE objects and some PLAIN objects in the
+    // Fraunhofer decoder – but the title is correctly parsed regardless.
+    // We accept any object that has a non-empty title and a known type.
+    if (nml->GetObjectType() == NML::INVALID || nml->GetTitle().empty()) {
+        if (nml_len >= 2) {
+            uint16_t oid = (static_cast<uint16_t>(buf[0]) << 8) | buf[1];
+            uint8_t  raw_type = (nml_len >= 3) ? (buf[2] >> 5) : 0;
+            self->handler_.onJournalineData(oid, raw_type, "JML-error", "");
+        }
+        return;
+    }
 
-    if (offset >= bytes.size()) return;
-
-    // Remaining bytes are the Journaline NML payload
-    // Parse Journaline object header (ETSI TS 102 979 §9):
-    //   bytes 0..1: object_id
-    //   byte  2:    object_type
-    //   byte  3:    number_of_links / title_length marker
-    //   ... (type-dependent)
-    const uint8_t* payload    = bytes.data() + offset;
-    size_t         payload_len = bytes.size() - offset;
-
-    if (payload_len < 4) return;
-
-    uint16_t object_id  = (static_cast<uint16_t>(payload[0]) << 8) | payload[1];
-    uint8_t  obj_type   = payload[2];
-    // payload[3]: for NewsItem = title_length; for Menu/Root = num_links
-
-    size_t pos = 3;
-
-    std::string title;
+    uint16_t object_id = nml->GetObjectId();
+    uint8_t  obj_type  = static_cast<uint8_t>(nml->GetObjectType());
+    std::string title  = nml->GetTitle();
     std::string body;
 
-    if (obj_type == 0x02) {
-        // NewsItem: byte 3 = title_length, then title bytes, then body bytes
-        uint8_t title_len = payload[pos++];
-        if (pos + title_len > payload_len) return;
-        title = std::string(reinterpret_cast<const char*>(payload + pos), title_len);
-        pos += title_len;
-        if (pos < payload_len) {
-            body = std::string(reinterpret_cast<const char*>(payload + pos),
-                               payload_len - pos);
+    // For PLAIN text objects the body is in the first item
+    if (nml->GetObjectType() == NML::PLAIN && nml->GetNrOfItems() > 0) {
+        body = nml->GetItemText(0);
+    }
+    // For MENU objects concatenate item texts as body summary
+    else if (nml->GetObjectType() == NML::MENU) {
+        for (unsigned int i = 0; i < nml->GetNrOfItems(); i++) {
+            if (i > 0) body += " | ";
+            body += nml->GetItemText(i);
         }
-    } else {
-        // Menu/Root (0x01, 0x03): byte 3 = num_links, byte 4 = title_length
-        pos++; // skip num_links
-        if (pos >= payload_len) return;
-        uint8_t title_len = payload[pos++];
-        if (pos + title_len > payload_len) return;
-        title = std::string(reinterpret_cast<const char*>(payload + pos), title_len);
     }
 
-    handler_.onJournalineData(object_id, obj_type, title, body);
+    self->handler_.onJournalineData(object_id, obj_type, title, body);
 }

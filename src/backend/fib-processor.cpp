@@ -569,20 +569,42 @@ int16_t FIBProcessor::HandleFIG0Extension13(
             case 0x001:     // not used
                 break;
 
-            case 0x004:     // TPEG
-            case 0x007:     // EPG
+            case 0x004:     // TPEG - nur loggen, kein Journaline-Trigger
+            case 0x007: {   // EPG  - nur loggen, kein Journaline-Trigger
+                // SCIds ist der SCIdS (Service Component Index, 4 bit) aus FIG 0/13.
+                // findComponent(SId, SCIds) sucht die Component die in FIG 0/2 mit
+                // bindPacketService() registriert wurde – dort wird compnr = SCIdS gesetzt.
+                ServiceComponent* comp = findComponent(SId, SCIds);
+                if (comp != nullptr) {
+                    std::clog << "fib-processor: PacketService appType=0x"
+                              << std::hex << appType
+                              << " SId=0x" << SId
+                              << " SCId=0x" << comp->SCId << std::dec << "\n";
+                }
+                break;
+            }
+
             case 0x44a: {   // Journaline (ETSI TS 102 979)
-                ServiceComponent* comp = findPacketComponent(
-                        (SCIds << 4) | (SCIds & 0x0F));
+                // Gleiches Prinzip: Component über SId + SCIdS finden,
+                // nicht über einen konstruierten SCId-Wert.
+                ServiceComponent* comp = findComponent(SId, SCIds);
                 journalinePresent  = true;
                 journalineSId      = SId;
                 journalineAppType  = static_cast<uint16_t>(appType);
                 if (comp != nullptr) {
                     journalineScId = comp->SCId;
-                    std::clog << "fib-processor: PacketService appType=0x"
-                              << std::hex << appType
-                              << " SId=0x" << SId
-                              << " SCId=0x" << comp->SCId << std::dec << "\n";
+                    std::clog << "fib-processor: Journaline appType=0x44a"
+                              << " SId=0x" << std::hex << SId
+                              << " SCId=0x" << comp->SCId
+                              << " subChId=" << std::dec << comp->subchannelId
+                              << " packetAddr=0x" << std::hex << comp->packetAddress
+                              << std::dec << "\n";
+                } else {
+                    // Component noch nicht via FIG 0/2 gesehen – normal beim ersten FIG 0/13.
+                    // Wird beim nächsten FIC-Zyklus erneut versucht.
+                    std::clog << "fib-processor: Journaline SId=0x" << std::hex << SId
+                              << " SCIds=" << std::dec << SCIds
+                              << " – Component noch nicht bekannt (warten auf FIG 0/2)\n";
                 }
                 break;
             }
