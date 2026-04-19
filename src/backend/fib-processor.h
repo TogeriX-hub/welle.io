@@ -54,14 +54,19 @@ class FIBProcessor {
         Subchannel getSubchannel(const ServiceComponent& sc) const;
         std::chrono::system_clock::time_point getTimeLastFCT0Frame() const;
 
-        // ASA (Automatic Safety Alert) – set from FIG 0/19
+        // ASA (Automatic Safety Alert) – set from FIG 0/15 (ETSI TS 104 089)
         struct AsaState {
             bool active = false;
-            uint16_t asw_flags = 0;
-            uint8_t cluster_id = 0;
+            bool ews_ensemble = false; // Heartbeat empfangen – Ensemble nimmt an EWS teil
+            bool is_test = false;      // Test-Flag aus FIG 0/15
+            uint8_t level = 0;         // Alert Level (1 oder 2)
+            uint8_t iid = 0;           // Incident ID (0x0–0xE)
+            uint16_t asw_flags = 0;    // Legacy (FIG 0/19), für Kompatibilität behalten
+            uint8_t cluster_id = 0;    // Legacy (FIG 0/19)
             std::time_t last_change = 0;
             bool has_region = false;
-            uint8_t region_id = 0;   // 0 = no region restriction
+            uint8_t region_id = 0;     // 0 = no region restriction
+            std::string status;        // "actual" oder "test"
         };
         AsaState getAsaState() const;
 
@@ -119,6 +124,7 @@ class FIBProcessor {
         void FIG0Extension10(uint8_t *);
         void FIG0Extension13(uint8_t *);
         void FIG0Extension14(uint8_t *);
+        void FIG0Extension15(uint8_t *);
         void FIG0Extension16(uint8_t *);
         void FIG0Extension17(uint8_t *);
         void FIG0Extension18(uint8_t *);
@@ -144,8 +150,12 @@ class FIBProcessor {
         dab_date_time_t dateTime = {};
         mutable std::mutex mutex;
 
-        // ASA state, updated by FIG 0/19
+        // ASA state, updated by FIG 0/15 (new) and FIG 0/19 (legacy)
         bool asaActive = false;
+        bool asaEwsEnsemble = false;  // Heartbeat gesehen → Ensemble ist EWS-fähig
+        bool asaIsTest = false;
+        uint8_t asaLevel = 0;
+        uint8_t asaIId = 0;
         uint16_t asaAswFlags = 0;
         uint8_t asaClusterId = 0;
         std::time_t asaLastChange = 0;

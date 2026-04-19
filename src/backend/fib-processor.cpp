@@ -95,6 +95,7 @@ void FIBProcessor::process_FIG0 (uint8_t *d)
         case 9: FIG0Extension9 (d); break;
         case 10: FIG0Extension10 (d); break;
         case 14: FIG0Extension14 (d); break;
+        case 15: FIG0Extension15 (d); break;
         case 13: FIG0Extension13 (d); break;
         case 17: FIG0Extension17 (d); break;
         case 18: FIG0Extension18 (d); break;
@@ -638,6 +639,74 @@ void FIBProcessor::FIG0Extension14 (uint8_t *d)
         }
 
     }
+}
+
+// FIG 0/15 – Emergency Warning System (ASA / Automatic Safety Alert)
+// ETSI TS 104 089 V1.1.1 (2024-09), Annex E
+//
+// Formen:
+//   Heartbeat:  leerer Payload → kein Alarm, aber Ensemble ist EWS-fähig
+//   Trigger:    Id-Feld + Status-Feld + Location Codes → Alarm aktiv
+//   Sustain:    Id-Feld → Alarm läuft noch
+//   End:        Id-Feld, C/N=1 → Alarm beendet
+void FIBProcessor::FIG0Extension15(uint8_t *d)
+{
+    int16_t length = getBits_5(d, 3);  // FIG-Länge in Bytes (inkl. 2-Byte-Header)
+    int16_t offset = 16;               // Bit-Offset nach dem 2-Byte FIG-0-Header
+
+    // KEIN lock_guard hier – processFIB haelt den Mutex bereits.
+    // Zweiter lock_guard auf nicht-rekursivem Mutex = Deadlock.
+
+    // Heartbeat: kein Payload nach dem Header → Ensemble nimmt an EWS teil
+    if (offset / 8 >= length) {
+        asaEwsEnsemble = true;
+        asaActive      = false;
+        // Kein last_change-Update beim Heartbeat – nur beim echten Alarm
+        return;
+    }
+
+    // Id-Feld parsen (8 Bit)
+    uint8_t iid     = getBits_4(d, offset);      // Incident Identifier (0x0–0xE)
+    uint8_t last    = getBits_1(d, offset + 4);  // 1 = letztes FIG 0/15 im Alert Set
+    uint8_t level   = getBits_2(d, offset + 5);  // Alert Level (1 oder 2)
+    uint8_t is_test = getBits_1(d, offset + 7);  // 1 = Testwarnung, 0 = Echtfall
+    offset += 8;
+    (void)last;
+
+    // Status-Feld vorhanden? (Trigger/Pre-Trigger haben es, Sustain/End nicht)
+    bool alert_active = false;
+    if (offset / 8 < length) {
+        uint8_t sid_lo      = getBits_5(d, offset);      // Service ID (5 Bit)
+        alert_active        = getBits_1(d, offset + 5);  // Alert-Flag
+        // uint8_t nff      = getBits_1(d, offset + 6);  // No Further FIG (ignoriert)
+        offset += 8;
+        (void)sid_lo;
+    }
+
+    // Location Codes – für WarnBridge nur loggen, kein Geo-Matching
+    int loc_bytes = length - (offset / 8);
+    if (loc_bytes > 0) {
+        std::clog << "fib-processor: FIG 0/15 location codes: "
+                  << loc_bytes << " bytes\n";
+    }
+
+    // State aktualisieren
+    asaEwsEnsemble = true;
+    asaActive      = alert_active;
+    asaIsTest      = (is_test == 1);
+    asaLevel       = level;
+    asaIId         = iid;
+    asaHasRegion   = (loc_bytes > 0);
+
+    asaLastChange = std::chrono::system_clock::to_time_t(
+            std::chrono::system_clock::now());
+
+    std::clog << "fib-processor: FIG 0/15"
+              << " active=" << alert_active
+              << " is_test=" << (int)is_test
+              << " level=" << (int)level
+              << " iid=" << (int)iid
+              << "\n";
 }
 
 void FIBProcessor::FIG0Extension17(uint8_t *d)
@@ -1362,12 +1431,17 @@ FIBProcessor::AsaState FIBProcessor::getAsaState() const
 {
     std::lock_guard<std::mutex> lock(mutex);
     AsaState s;
-    s.active      = asaActive;
-    s.asw_flags   = asaAswFlags;
-    s.cluster_id  = asaClusterId;
-    s.last_change = asaLastChange;
-    s.has_region  = asaHasRegion;
-    s.region_id   = asaRegionId;
+    s.active       = asaActive;
+    s.ews_ensemble = asaEwsEnsemble;
+    s.is_test      = asaIsTest;
+    s.level        = asaLevel;
+    s.iid          = asaIId;
+    s.asw_flags    = asaAswFlags;
+    s.cluster_id   = asaClusterId;
+    s.last_change  = asaLastChange;
+    s.has_region   = asaHasRegion;
+    s.region_id    = asaRegionId;
+    s.status       = asaIsTest ? "test" : "actual";
     return s;
 }
 
