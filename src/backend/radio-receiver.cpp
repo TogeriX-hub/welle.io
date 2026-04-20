@@ -285,6 +285,7 @@ bool RadioReceiver::addJournalineToDecode(ProgrammeHandlerInterface& handler)
             if (sc.transportMode() != TransportMode::PacketData) continue;
             const auto subch = ficHandler.fibProcessor.getSubchannel(sc);
             if (!subch.valid()) continue;
+            if (sc.packetAddress == 0) continue;  // keine gültige Paketadresse
 
             clog << "RadioReceiver: Adding Journaline subchannel (fallback) "
                  << subch.subChId
